@@ -239,3 +239,334 @@ cluster.name: lhf
 | delete xxx           | DELETE http://                |
 | 索引                 | 全文索引                      |
 
+
+
+## 4. ElasticSearch 分词器
+
+### 4.1 内置分词器
+
+> ElasticSearch 核心功能就是数据检索，首先通过索引将文档写入 es。查询分析则分为两个步骤：
+>
+> 1. 词条化：分词器将输入的文本转为一个一个的词条流。
+> 2. 过滤：比如停用词过滤器会从词条这去除不相干的词条（的，嗯，啊，呢）；另外还有同义词过滤器、小写过滤器等。
+
+ElasticSearch 中内置了多种分词器可以供使用：
+
+| 分词器               | 作用                                                     |
+| -------------------- | -------------------------------------------------------- |
+| Standard Analyzer    | 标准分词器，适用于英语等。                               |
+| Simple Analyzer      | 简单分词器，基于分字母字符进行分词，单词会被转为小写字母 |
+| Whitespace Analyzer  | 空格分词器，按照空格进行切分                             |
+| Stop Analyzer        | 类似于简单分词器，但是增加了停用词的功能。               |
+| Keyword Analyzer     | 关键词分词器，输入文本等于输出文本                       |
+| Pattern Analyzer     | 理由正则表达式对文本进行切分，支持停用词                 |
+| Language Analyzer    | 针对特定语言的分词器                                     |
+| Fingerprint Analyzer | 指纹分析仪分词器，通过创建标记进行重复检测。             |
+
+
+
+### 4.2 中文分词器
+
+#### 4.2.1 安装
+
+在 Es 中，使用较多的中文分词器是 [elasticsearch-analysis-ik](https://github.com/medcl/elasticsearch-analysis-ik)，这是个 es 第三方插件，代码托管在 GitHub 上。
+
+具体使用步骤如下：
+
+1. 首先打开 https://github.com/medcl/elasticsearch-analysis-ik
+2. 在 https://github.com/medcl/elasticsearch-analysis-ik/releases 找到对应版本的压缩包
+3. 下载文件解压到 es/plugins/ik 目录下（需新建ik目录）
+4. 重启 es 服务（日志中可以看到 ik 插件）
+
+更多使用方法，可在官网查看。
+
+
+
+#### 4.2.2 测试
+
+1. 创建索引
+
+* 发送请求 PUT http://localhost:9200/test
+* 返回值
+
+```json
+{
+    "acknowledged": true,
+    "shards_acknowledged": true,
+    "index": "test"
+}
+```
+
+
+
+2. 分词测试
+
+* 发送请求 POST http://localhost/test/_analyze
+* 请求参数 JSON
+
+```json
+{
+    "analyzer": "ik_smart",
+    "text": ""
+}
+```
+
+
+
+#### 4.2.3 自定义扩展词库
+
+##### 4.2.3.1 本地自定义
+
+在 plugins/ik/config 目录下，新建 ext.dic 文件（文件名任意），在该文件中可以配置自定义词库。
+
+* 新建 ext.dic 文件，并写入一个词`我的是`，多词换行写入
+* 在 IKAnalyzer.cfg.xml 文件中配置
+
+```xml
+<entry key="ext_dict">ext.dic</entry>
+```
+
+* 重启 Es
+
+
+
+##### 4.2.3.2 远程词库
+
+也可以配置远程词库，支持热更新（无需重启 es）
+
+热更新需要提供一个接口，接口返回扩展词即可。
+
+* 可以使用 nginx 或者其它 http 服务器
+* 例如使用 springboot 放入一个静态文件，在 IKAnalyzer.cfg.xml 中配置访问该静态文件
+* 修改静态文件的时候需要重启 http 服务
+
+该 http 请求需要返回两个头部(header)，一个是 `Last-Modified`，一个是 `ETag`，这两者都是字符串类型，只要有一个发生变化，该插件就会去抓取新的分词进而更新词库
+
+具体细节 https://github.com/medcl/elasticsearch-analysis-ik
+
+
+
+## 5. ElasticSearch 索引管理
+
+
+
+### 5.1 新建索引
+
+#### 5.1.1 通过 head 插件新建索引
+
+在 head 插件中，选择索引选项卡，然后点击新建索引。新建索引时，需要填入索引名称、分片数以及副本数。
+
+索引创建成功后可以在 head 插件中看到。
+
+插件中数字代表分片，粗框代表主主分片，细框代表副本（点一下框，可以通过 primary 属性查看是主分片还是副本）。Kibana 只有一个分片和副本，所以只有 0。
+
+
+
+#### 5.1.2 通过请求创建
+
+* 可以通过 postman 发送请求，也可以通过 kibana 发送请求。kibana 有提示，利于编写。
+
+* kibana
+
+```
+PUT book 			//创建索引，kibana 省略了前面的地址信息
+```
+
+* psotman
+
+```
+http://localhost:9200/book				// PUT请求
+```
+
+
+
+**注意：**
+
+1. 索引名称不能有大写字母
+2. 索引名不可重复
+
+
+
+### 5.2 更新索引
+
+#### 5.2.1 修改基础信息
+
+创建索引后可修改其信息
+
+* kibana
+
+```
+PUT book/_settings
+{
+	"number_of_replicas": 2		// 修改副本数
+}
+```
+
+
+
+#### 5.2.2 修改索引的独写权限
+
+索引创建成功后，可以向索引写入文档
+
+* kibana
+
+```
+PUT book/_doc/1				// 1 文档 id
+{
+	"title": "三国演义"		// 
+}
+```
+
+默认情况下，索引是具有独写权限的，当然这个独写权限也可以关闭。
+
+例如关闭索引的写权限：
+
+```
+PUT book/_settings
+{
+	"blocks.write": true
+}
+```
+
+关闭了之后，索引将无法写入文档，改成 false 可重新打开。
+
+其它类似的权限有：
+
+* blocks.write
+* blocks.read
+* blocks.read_only
+
+
+
+### 5.3 查看索引
+
+* 通过 head 插件查看索引信息
+* 通过 kibana 查看
+
+```
+GET book/_settings
+```
+
+也可以同时查看多个索引信息：
+
+```
+GET book,test/_settings
+```
+
+也可以查看所有索引信息：
+
+```
+GET _all/_settings
+```
+
+### 5.4 删除索引
+
+* head 插件可以删除
+* kibana 删除
+
+```
+DELETE book
+```
+
+
+
+### 5.5 索引的打开/关闭
+
+* 关闭
+
+```
+POST book/_close
+```
+
+* 开启
+
+```
+POST book/_open
+```
+
+同时关闭或打开多个或者所有索引：
+
+```
+POST book,test/_close	// 多个
+POST _all/_close		// 所有
+```
+
+
+
+### 5.6 索引复制
+
+> 索引复制只会复制数据，不会复制配置（分片和副本）
+
+* kibana
+
+```
+POST _reindex
+{
+	"source": {"index": "book"},		// 要复制的索引
+	"dest": {"index": "book_new"}		// 复制到新的索引
+}
+```
+
+复制的时候，可以添加查询条件：
+
+```
+POST _reindex
+{
+	"source": {"index": "book","query":{}},		// 复制符合查询条件的数据
+	"dest": {"index": "book_new"}		// 复制到新的索引
+}
+```
+
+具体查询条件编写规则，在后面学习。
+
+
+
+### 5.7 索引别名
+
+可以为索引创建别名，如果这个别名是唯一的，该别名可以代替索引名称。
+
+* 创建别名
+
+```json
+POST /_aliases
+{
+	"action": [{				// 数组，可同时操作多个
+        "add": {
+            "index": "book",	// 索引
+            "alias": "book_alias"	// 别名
+        }
+    }]
+}
+```
+
+* 移除别名
+
+```json
+POST /_aliases
+{
+	"action": [{
+        "remove": {
+            "index": "book",	// 索引
+            "alias": "book_alias"	// 别名
+        }
+    }]
+}
+```
+
+* 查询别名
+
+```
+GET /book/_alias		// 查询索引的别名
+GET /book_alias/_alias	// 查询别名的索引
+```
+
+* 查询所有别名
+
+```
+GET /_alias
+```
+
+
+
+
+
