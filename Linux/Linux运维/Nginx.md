@@ -320,3 +320,165 @@ server {
 }
 ```
 
+
+
+## 6、高可用
+
+> 采用主备机制
+
+![](http://image.lhf223.cn/img/20201129200240.png))
+
+### 1、准备工作
+
+>(1) 需要两台服务器192.168.17.129 和192.168.17.1314
+>(2) 在两台服务器安装nginx.
+>(3) 在两合服务器安装keepalived.
+
+
+
+### 2、在两台服务器安装keepalived
+
+
+
+使用yum命令进行安装
+
+```
+$ yum install keepalived
+$ rpm -q -a keepalived    #查看是否已经安装上
+```
+
+默认安装路径: /etc/keepalived
+
+安装之后，在etc里面生成目录keepalived, 有配置文件keepalived.conf
+
+
+
+### 3、完成高可用配置(主从配置)
+
+1）修改keepalived的配置文件`keepalived.conf`为：
+
+```bash
+global_defs {
+	notification_email {
+	  acassen@firewall.loc
+	  failover@firewall.loc
+	  sysadmin@firewall.loc
+	}
+	notification_email_from Alexandre.Cassen@firewall.loc
+	smtp_ server 192.168.17.129
+	smtp_connect_timeout 30
+	router_id LVS_DEVEL	# LVS_DEVEL这字段在/etc/hosts文件中看；通过它访问到主机
+}
+
+vrrp_script chk_http_ port {
+	script "/usr/local/src/nginx_check.sh"
+	interval 2   # (检测脚本执行的间隔)2s
+	weight 2  #权重，如果这个脚本检测为真，服务器权重+2
+}
+
+vrrp_instance VI_1 {
+	state BACKUP   # 备份服务器上将MASTER 改为BACKUP
+	interface ens33 //网卡名称
+	virtual_router_id 51 # 主、备机的virtual_router_id必须相同
+	priority 100   #主、备机取不同的优先级，主机值较大，备份机值较小
+	advert_int 1	#每隔1s发送一次心跳
+	authentication {	# 校验方式， 类型是密码，密码1111
+        auth type PASS
+        auth pass 1111
+    }
+	virtual_ipaddress { # 虛拟ip
+		192.168.17.50 // VRRP H虛拟ip地址
+	}
+}
+```
+
+（2）在路径/usr/local/src/ 下新建检测脚本 nginx_check.sh
+
+nginx_check.sh
+
+```bash
+#! /bin/bash
+A=`ps -C nginx -no-header | wc - 1`
+if [ $A -eq 0];then
+	/usr/local/nginx/sbin/nginx
+	sleep 2
+	if [`ps -C nginx --no-header| wc -1` -eq 0 ];then
+		killall keepalived
+	fi
+fi
+```
+
+(3) 把两台服务器上nginx和keepalived启动
+
+```bash
+$ systemctl start keepalived.service		#keepalived启动
+$ ps -ef I grep keepalived		#查看keepalived是否启动
+```
+
+
+
+### 4、测试
+
+(1) 在浏览器地址栏输入虚拟ip地址192.168.17.50
+
+(2) 把主服务器(192.168.17.129) nginx和keealived停止，再输入192.168.17.50.
+
+```
+$ systemctl stop keepalived.service  #keepalived停止
+```
+
+
+
+## 7、Nginx 基本原理解析
+
+
+
+### 1、master和worker
+
+![](http://image.lhf223.cn/img/20201129200718.png)
+
+
+
+### 2、worker如何进行工作的
+
+![](http://image.lhf223.cn/img/20201129200817.png)
+
+
+
+### 3、一个master和多个woker的好处
+
+(1) 可以使用nginx -s reload热部署。
+
+> 首先，对于每个worker进程来说，独立的进程，不需要加锁，所以省掉了锁带来的开销，同时在编程以及问题查找时，也会方便很多。其次,采用独立的进程，可以让互相之间不会影响，一个进程退出后，其它进程还在工作，服务不会中断，master进程则很快启动新的worker进程。当然，worker进程的异常退出，肯定是程序有bug了，异常退出，会导致当前worker.上的所有请求失败，不过不会影响到所有请求，所以降低了风险。
+
+
+
+
+
+### 4、设置多少个woker合适
+
+> Nginx同redis类似都采用了io多路复用机制，每个worker都是一个独立的进程， 但每个进程里只有一个主线程，通过异步非阻塞的方式来处理请求，即使是 千上万个请求也不在话下。每个worker的线程可以把一个cpu的性能发挥到极致。所以worker数和服务器的cpu数相等是最为适宜的。设少了会浪费cpu,设多了会造成cpu频繁切换上下文带来的损耗。
+
+```bash
+# 设置worker数量
+worker.processes 4 
+# work绑定cpu(4work绑定4cpu)
+worker_cpu_affinity 0001 0010 0100 1000
+# work绑定cpu (4work绑定8cpu中的4个)
+worker_cpu_affinity 0000001 00000010 00000100 00001000
+```
+
+
+
+### 5、连接数worker_ connection
+
+> 这个值是表示每个worker进程所能建立连接的最大值，所以，一个nginx 能建立的最大连接数，应该是worker.connections * worker processes。当然，这里说的是最大连接数，对于HTTP 请求本地资源来说，能够支持的最大并发数量是worker.connections * worker processes,如果是支持http1.1的浏览器每次访问要占两个连接，所以普通的静态访问最大并发数是: worker.connections * worker.processes / 2, 而如果是HTTP作为反向代理来说，最大并发数量应该是worker.connections * worker_proceses/4. 因为作为反向代理服务器，每个并发会建立与客户端的连接和与后端服务的连接，会占用两个连接.
+
+
+
+第一个: 发送请求，占用了woker的几个连接数?
+答案: 2或者4个。
+
+第二个: nginx有一个master,有四个woker,每个woker支持最大的连接数1024,支持的最大并发数是多少?
+答案：普通的静态访问最大并发数是: worker connections * worker processes /2，
+而如果是HTTP作为反向代理来说，最大并发数量应该是worker connections * worker processes/4
