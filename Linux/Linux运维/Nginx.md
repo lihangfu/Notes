@@ -181,11 +181,142 @@ http {
 
 
 
+## 3、反向代理
+
+```
+server {
+    	listen		80;					// 监听的端口
+    	server_name www.123.com;		// 指定主机名
+
+    	location / {					// 匹配的路径
+    		root html;
+    		proxy_pass http://10.180.60.134:8080;// 反向代理到哪
+    		index	index.html index.html;
+    	}
+}
+
+或者
+server {
+    	listen		80;					// 监听的端口
+    	server_name www.123.com;		// 指定主机名
+
+    	location ~/edu/ {					// 匹配的路径
+    		root html;
+    		proxy_pass http://10.180.60.134:8080;// 反向代理到哪
+    		index	index.html index.html;
+    	}
+    	location ~/vod/ {					// 匹配的路径
+    		root html;
+    		proxy_pass http://10.180.60.134:8080;// 反向代理到哪
+    		index	index.html index.html;
+    	}
+}
+```
 
 
 
+**匹配示例**
+
+```
+location [ = | ~ | ~*| ^~] uri {					// 匹配的路径
+
+}
+```
+
+* =：用于不含正则表达式的 uri 前，要求请求字符串与 uri 严格匹配，如果匹配成功，就停止继续向下搜索并立即处理该请求。
+* ~：用于表示 uri 包含正则表达式，并且区分大小写。
+* ~*：用于表示 uri 包含正则表达式，并且不区分大小写。
+* ^~：用于不含正则表达式的 uri 前，要求 Nginx 服务器找到标识 uri 和请 4求字符串匹配度最高的 location 后，立即使用此 location 处理请求，而不再使用 location 块中的正则 uri 和请求字符串做匹配。
+* 注意：如果 uri 包含正则表达式，则必须要有 ~ 或者 ~* 表示。
 
 
 
+## 4、负载均衡
 
+```
+upstream mysvr {   						// 定义上流服务
+		server 10.180.60.134:8080;
+		server 10.180.60.134:8081;
+}
+server {
+    	listen		80;
+    	server_name www.123.com;
+    	location ~/text/ {
+    		root html;
+    		proxy_pass http://mysvr;	// 转发到上流服务
+    		index	index.html index.html;
+    	}
+}
+```
+
+
+
+**负载均衡策略：**
+
+* 轮询（默认，无需任何配置）：请求按请求时间顺序逐一分配到不同的后端服务，如果后的服务 down 掉，可以自动剔除。
+* weight：权重，默认为1，权重越高被分配的客户端就越多。
+
+```
+// 指定沦陷几率，weight 和访问比率成正比，用户后端服务性能不均的情况。
+upstream mysvr {   						// 定义上流服务
+		server 10.180.60.134:8080 weight=10;
+		server 10.180.60.134:8081 weight=10;
+}
+```
+
+* ip_hash：每个请求按访问 ip 的 hash 结果分配，这样每个客户端固定访问一个后端服务，可以解决 session 的问题。
+
+```
+upstream mysvr {   						// 定义上流服务
+		ip_hash
+		server 10.180.60.134:8080;
+		server 10.180.60.134:8081;
+}
+```
+
+* fair（第三方）：按后端服务器的响应时间来分配请求，响应时间短的优先分配。
+
+```
+upstream mysvr {   
+		server 10.180.60.134:8080;
+		server 10.180.60.134:8081;  
+		fair;						# 有的版本不支持
+}
+```
+
+
+
+## 5、动静分离
+
+>Nginx 动静分离鉴定来说就是把动态跟静态请求分开，不能理解成只是单纯的把动态页面和静态页面物理分开，严格意义上说应该是动态请求跟静态请求分开，可以理解成使用 Nginx 处理静态页面，Tomcat 处理动态页面。动静分离从目前实现角度来讲大致分为两种。
+
+1. 一种是纯粹把静态文件独立成单独的域名，放在独立的服务器上，也就是目前主流推崇的方案；
+2. 另外一种就是动态跟静态文件混合在一起发布，通过 nginx 来分开。
+
+
+
+通过 location 指定不同后缀名实现不同的请求和转发。通过 expires 参数设置，可以使浏览器缓存过期时间，减少与服务器之间的请求和流量。
+
+具体 expires定义：是给一个资源设定一个过期时间，也就是说无需去服务端验证，直接通过浏览器自身确认是否过期即可，所以不会产生额外的流量。此种方法非常适合不经常变动的资源。（如果经常更新的文件，不建议使用 expires 来缓存），如果设置为 3d，表示在这三天之内访问这个 URL，发生一个请求，比对服务器该文件最后更新时间没有变化，则不会从服务器抓取，返回状态码304，如果有修改，则直接从服务器重新下载，返回状态码 200。
+
+
+
+**访问静态配置**
+
+```
+server {
+	listen	80;
+	server_name	192.168.17.129;
+	
+	location /www/ {					# 匹配路径
+		root	/data/;					# 静态资源路径
+		index	index.html	index.htm;	
+	}
+	
+	location /image/ {
+		root	/data/;
+		autoindex	on;					# 访问文件时，列出文件夹内容
+	}
+}
+```
 
