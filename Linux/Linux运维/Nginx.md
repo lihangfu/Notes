@@ -116,6 +116,18 @@ http      #http块
 
 
 
+```bash
+server_name  www.test.com localhost;		# 匹配明确的域名（可以填多个，Nginx不会去验证DNS）
+server_name  *.test.com;					# 以 *. 开头，模糊匹配
+server_name  www.test.*;					# 以 .* 结尾
+server_name  ~^(?<www>.+)\.test\.com$;		# 正则表达式
+server_name  "";							# 空字符串，不会匹配任何域名
+```
+
+
+
+
+
 #### 2.2.2 配置文件详解
 
 ```bash
